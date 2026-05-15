@@ -1,6 +1,12 @@
+use std::env;
 use std::process::Command;
 
 fn main() {
+    // --- 0. LEGGIAMO GLI ARGOMENTI EXTRA ---
+    // Raccogliamo tutto quello che l'utente scrive dopo "git-assistant"
+    // .skip(1) serve a ignorare il nome del programma stesso
+    let extra_args: Vec<String> = env::args().skip(1).collect();
+
     // --- 1. PRENDIAMO IL DIFF ---
     let git_diff = Command::new("git")
         .args(["diff", "--cached"])
@@ -55,15 +61,25 @@ DIFF TO ANALYZE:
         .expect("Errore durante il commit");
 
     if commit_status.success() {
-        // --- 4. ESEGUIAMO IL PUSH ---
+        // --- 4. ESEGUIAMO IL PUSH CON I PARAMETRI EXTRA ---
         println!("🚀 Invio al server (push)...");
-        let push_status = Command::new("git")
-            .arg("push")
-            .status()
-            .expect("Errore durante il push");
+        
+        let mut push_cmd = Command::new("git");
+        push_cmd.arg("push");
+
+        // Se hai scritto parametri come --force, li aggiungiamo al comando push
+        if !extra_args.is_empty() {
+            println!("   🔧 Parametri aggiuntivi rilevati: {}", extra_args.join(" "));
+            push_cmd.args(&extra_args);
+        }
+
+        let push_status = push_cmd.status()
+            .expect("Errore durante l'esecuzione del push");
 
         if push_status.success() {
             println!("✨ Tutto fatto! Codice online.");
+        } else {
+            println!("❌ Il push ha restituito un errore (forse devi fare un git pull prima?).");
         }
     }
 }
