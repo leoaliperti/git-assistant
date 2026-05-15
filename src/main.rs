@@ -158,50 +158,51 @@ fn run(args: Args) -> Result<()> {
     // --- IL CICLO INTERATTIVO ---
     loop {
         println!("🤖 Consulting Apple Intelligence…");
-        let commit_message = match generate_commit_message(&diff)? {
-            Some(msg) => msg,
-            None => {
-                return Err(AppError::new("❌ Apple Intelligence failed or triggered filters."));
+        
+        // Se l'AI fallisce, non andiamo più in panico (niente return Err)
+        match generate_commit_message(&diff) {
+            Ok(Some(commit_message)) => {
+                println!("\n✅ Generated commit message:\n   > \x1b[1;36m{}\x1b[0m\n", commit_message);
+
+                if args.auto_accept {
+                    final_message = commit_message;
+                    break;
+                }
+
+                print!("Use this message? [Y/n/r(egenerate)]: ");
+                io::stdout().flush().map_err(|_| AppError::new("Failed to flush stdout"))?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|_| AppError::new("Failed to read input"))?;
+                let ans = input.trim().to_lowercase();
+
+                if ans.is_empty() || ans == "y" {
+                    final_message = commit_message;
+                    break;
+                } else if ans == "r" {
+                    println!("🔄 Regenerating...\n");
+                    continue;
+                }
             }
-        };
-
-        println!("\n✅ Generated commit message:\n   > \x1b[1;36m{}\x1b[0m\n", commit_message);
-
-        // Se l'utente ha passato "-y", saltiamo la conferma
-        if args.auto_accept {
-            final_message = commit_message;
-            break;
+            Ok(None) | Err(_) => {
+                // L'AI HA FALLITO (Lingua non supportata, filtri di sicurezza, ecc.)
+                println!("⚠️  Apple Intelligence failed or triggered safety/language filters.");
+            }
         }
 
-        // Chiediamo conferma
-        print!("Use this message? [Y/n/r(egenerate)]: ");
+        // --- FALLBACK MANUALE (Se premiamo 'n' o se l'AI fallisce) ---
+        print!("✏️  Enter custom commit message: ");
         io::stdout().flush().map_err(|_| AppError::new("Failed to flush stdout"))?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).map_err(|_| AppError::new("Failed to read input"))?;
-        let ans = input.trim().to_lowercase();
-
-        if ans.is_empty() || ans == "y" {
-            final_message = commit_message;
-            break;
-        } else if ans == "r" {
-            println!("🔄 Regenerating...\n");
-            continue;
-        } else {
-            // L'utente ha premuto 'n' o altro, gli facciamo scrivere il messaggio a mano
-            print!("✏️  Enter custom commit message: ");
-            io::stdout().flush().map_err(|_| AppError::new("Failed to flush stdout"))?;
-            
-            let mut custom = String::new();
-            io::stdin().read_line(&mut custom).map_err(|_| AppError::new("Failed to read input"))?;
-            
-            let custom_trim = custom.trim().to_string();
-            if custom_trim.is_empty() {
-                return Err(AppError::new("❌ Commit aborted (empty message)."));
-            }
-            final_message = custom_trim;
-            break;
+        
+        let mut custom = String::new();
+        io::stdin().read_line(&mut custom).map_err(|_| AppError::new("Failed to read input"))?;
+        
+        let custom_trim = custom.trim().to_string();
+        if custom_trim.is_empty() {
+            return Err(AppError::new("❌ Commit aborted (empty message)."));
         }
+        final_message = custom_trim;
+        break;
     }
 
     // 3. Commit
