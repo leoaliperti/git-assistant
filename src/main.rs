@@ -1,37 +1,56 @@
 use std::process::Command;
 
 fn main() {
-    // 1. Eseguiamo il comando per vedere quali file sono pronti per il commit
+    // --- 1. PRENDIAMO IL DIFF ---
     let git_diff = Command::new("git")
         .args(["diff", "--cached"])
         .output()
-        .expect("Errore critico: Impossibile eseguire il comando git.");
+        .expect("Errore: Impossibile eseguire git diff");
 
     let diff_text = String::from_utf8_lossy(&git_diff.stdout);
-
-    // Se non c'è nulla in stage (nessun file aggiunto con git add), ci fermiamo
     if diff_text.trim().is_empty() {
-        println!("⚠️ Nessun file in stage. Usa 'git add <file>' prima di lanciare l'assistente.");
+        println!("⚠️ Nulla in stage. Usa 'git add' prima.");
         return;
     }
 
-    // 2. Prepariamo le istruzioni per Apfel (Il "Prompt")
+    // --- 2. CHIEDIAMO AD APFEL ---
     let prompt = format!(
-        "Sei uno sviluppatore esperto. Scrivi un messaggio di commit breve e descrittivo per questo diff di git. Usa la convenzione 'Conventional Commits' (es. feat:, fix:, docs:). Rispondi SOLO con il messaggio, senza intro o spiegazioni aggiuntive.\n\nEcco il diff:\n{}",
+        "Write a short, professional git commit message in English for this diff. Use Conventional Commits format. Output ONLY the message:\n{}",
         diff_text
     );
 
-    println!("🤖 Lettura del codice e consultazione di Apple Intelligence in corso...");
-
-    // 3. Chiamiamo la CLI di apfel dal nostro programma Rust
+    println!("🤖 Generazione messaggio in corso...");
     let apfel_output = Command::new("apfel")
         .arg(&prompt)
         .output()
-        .expect("Errore: Impossibile trovare 'apfel'. Sicuro di averlo installato con brew?");
+        .expect("Errore: apfel non trovato");
 
-    // 4. Estraiamo la risposta
-    let commit_message = String::from_utf8_lossy(&apfel_output.stdout);
+    let commit_message = String::from_utf8_lossy(&apfel_output.stdout).trim().to_string();
     
-    println!("\n✅ Messaggio suggerito:\n");
-    println!("{}", commit_message.trim());
+    if commit_message.is_empty() || commit_message.contains("apple.com") {
+        println!("❌ L'AI ha dato una risposta non valida. Riprova.");
+        return;
+    }
+
+    println!("✅ Messaggio creato: {}", commit_message);
+
+    // --- 3. ESEGUIAMO IL COMMIT ---
+    println!("📦 Eseguo il commit...");
+    let commit_status = Command::new("git")
+        .args(["commit", "-m", &commit_message])
+        .status()
+        .expect("Errore durante il commit");
+
+    if commit_status.success() {
+        // --- 4. ESEGUIAMO IL PUSH ---
+        println!("🚀 Invio al server (push)...");
+        let push_status = Command::new("git")
+            .arg("push")
+            .status()
+            .expect("Errore durante il push");
+
+        if push_status.success() {
+            println!("✨ Tutto fatto! Codice online.");
+        }
+    }
 }
