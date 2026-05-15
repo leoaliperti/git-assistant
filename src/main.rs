@@ -1,13 +1,10 @@
 use std::env;
-use std::process::{self, Command};
+use std::io::{self, Write};
+use std::process::{self, Command, Stdio};
 
 // ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
-
-/// A lightweight error wrapper that carries a user-facing message.
-/// Using a newtype keeps the dependency footprint at zero (no `anyhow`/`thiserror`
-/// needed), while still giving us `?`-based propagation throughout the codebase.
 #[derive(Debug)]
 struct AppError(String);
 
@@ -23,8 +20,6 @@ impl std::fmt::Display for AppError {
     }
 }
 
-// Allow any type that implements std::error::Error to be wrapped automatically,
-// so we can use `?` on things like io::Error without manual conversion.
 impl<E: std::error::Error> From<E> for AppError {
     fn from(e: E) -> Self {
         Self(e.to_string())
@@ -36,26 +31,31 @@ type Result<T> = std::result::Result<T, AppError>;
 // ---------------------------------------------------------------------------
 // CLI argument handling
 // ---------------------------------------------------------------------------
-
-/// Everything the program needs from the command line.
 struct Args {
-    /// Flags forwarded verbatim to `git push` (e.g. `--force`, `origin main`).
     push_args: Vec<String>,
+    auto_accept: bool,
 }
 
 impl Args {
     fn parse() -> Self {
-        // Skip argv[0] (the binary name). Everything else is a push argument.
-        let push_args: Vec<String> = env::args().skip(1).collect();
-        Self { push_args }
+        let mut push_args = Vec::new();
+        let mut auto_accept = false;
+
+        // Saltiamo il nome del programma (argv[0])
+        for arg in env::args().skip(1) {
+            if arg == "-y" || arg == "--yes" {
+                auto_accept = true;
+            } else {
+                push_args.push(arg);
+            }
+        }
+        Self { push_args, auto_accept }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Git helpers
 // ---------------------------------------------------------------------------
-
-/// Returns the staged diff, or `None` when the staging area is empty.
 fn get_staged_diff() -> Result<Option<String>> {
     let output = Command::new("git")
         .args(["diff", "--cached"])
@@ -75,7 +75,6 @@ fn get_staged_diff() -> Result<Option<String>> {
     }
 }
 
-/// Runs `git commit -m <message>` and returns whether it succeeded.
 fn git_commit(message: &str) -> Result<bool> {
     let status = Command::new("git")
         .args(["commit", "-m", message])
@@ -85,7 +84,6 @@ fn git_commit(message: &str) -> Result<bool> {
     Ok(status.success())
 }
 
-/// Runs `git push [extra_args…]` and returns whether it succeeded.
 fn git_push(extra_args: &[String]) -> Result<bool> {
     let status = Command::new("git")
         .arg("push")
@@ -99,38 +97,34 @@ fn git_push(extra_args: &[String]) -> Result<bool> {
 // ---------------------------------------------------------------------------
 // Apple Intelligence (apfel) integration
 // ---------------------------------------------------------------------------
-
 const SYSTEM_PROMPT: &str =
     "You are a strict Git Commit tool. Output EXACTLY ONE single line. \
-     Format: <type>: <description>. NO LISTS. NO EXPLANATIONS. NO MULTIPLE OPTIONS.";
+     Format: <type>: <description>. NO LISTS. NO EXPLANATIONS.";
 
-/// Calls `apfel` with the staged diff and returns the first non-empty line of
-/// its response, which is the generated commit message.
-///
-/// The flags `--permissive -q -s` are **required** to bypass Apple's on-device
-/// content guardrails and must not be changed.
 fn generate_commit_message(diff: &str) -> Result<Option<String>> {
-    let user_prompt = format!(
-        "Write exactly ONE single commit message for the following diff:\n\n{diff}"
-    );
-
-    let output = Command::new("apfel")
+    // Apriamo apfel dicendogli che l'input arriverà tramite "pipe" (stdin)
+    let mut child = Command::new("apfel")
         .arg("--permissive")
         .arg("-q")
         .arg("-s")
         .arg(SYSTEM_PROMPT)
-        .arg(&user_prompt)
-        .output()
-        .map_err(|e| {
-            AppError::new(format!(
-                "Could not run `apfel` — is it installed and on your PATH? ({e})"
-            ))
-        })?;
+        .arg("Analyze the piped diff and write exactly ONE single commit message.")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::new(format!("Could not spawn `apfel`: {e}")))?;
 
-    // apfel writes its response to stdout; stderr may carry debug noise.
+    // Versiamo il diff dentro lo stdin di apfel (come fare cat file | apfel)
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(diff.as_bytes())
+            .map_err(|e| AppError::new(format!("Failed to pipe diff to apfel: {e}")))?;
+    }
+
+    let output = child.wait_with_output()
+        .map_err(|e| AppError::new(format!("Failed to wait on apfel: {e}")))?;
+
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
 
-    // Take only the first non-empty line to strip any preamble/trailing text.
     let message = raw
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -138,7 +132,6 @@ fn generate_commit_message(diff: &str) -> Result<Option<String>> {
         .trim()
         .to_string();
 
-    // An empty message or a safety-filter redirect URL means the model bailed.
     if message.is_empty() || message.contains("apple.com") {
         return Ok(None);
     }
@@ -149,9 +142,7 @@ fn generate_commit_message(diff: &str) -> Result<Option<String>> {
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
-
 fn run(args: Args) -> Result<()> {
-    // 1. Check for staged changes.
     let diff = match get_staged_diff()? {
         Some(d) => d,
         None => {
@@ -160,37 +151,69 @@ fn run(args: Args) -> Result<()> {
         }
     };
 
-    // 2. Generate commit message via Apple Intelligence.
-    println!("🤖 Consulting Apple Intelligence…");
-    let commit_message = match generate_commit_message(&diff)? {
-        Some(msg) => msg,
-        None => {
-            return Err(AppError::new(
-                "❌ Apple Intelligence triggered a safety filter or returned an empty response. \
-                 Please try again.",
-            ));
+    let mut final_message = String::new();
+
+    // --- IL CICLO INTERATTIVO ---
+    loop {
+        println!("🤖 Consulting Apple Intelligence…");
+        let commit_message = match generate_commit_message(&diff)? {
+            Some(msg) => msg,
+            None => {
+                return Err(AppError::new("❌ Apple Intelligence failed or triggered filters."));
+            }
+        };
+
+        println!("\n✅ Generated commit message:\n   > \x1b[1;36m{}\x1b[0m\n", commit_message);
+
+        // Se l'utente ha passato "-y", saltiamo la conferma
+        if args.auto_accept {
+            final_message = commit_message;
+            break;
         }
-    };
 
-    println!("✅ Generated commit message:\n   > {commit_message}");
+        // Chiediamo conferma
+        print!("Use this message? [Y/n/r(egenerate)]: ");
+        io::stdout().flush().map_err(|_| AppError::new("Failed to flush stdout"))?;
 
-    // 3. Commit with the generated message.
-    println!("📝 Committing…");
-    if !git_commit(&commit_message)? {
-        return Err(AppError::new(
-            "❌ `git commit` failed. Check the output above for details.",
-        ));
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).map_err(|_| AppError::new("Failed to read input"))?;
+        let ans = input.trim().to_lowercase();
+
+        if ans.is_empty() || ans == "y" {
+            final_message = commit_message;
+            break;
+        } else if ans == "r" {
+            println!("🔄 Regenerating...\n");
+            continue;
+        } else {
+            // L'utente ha premuto 'n' o altro, gli facciamo scrivere il messaggio a mano
+            print!("✏️  Enter custom commit message: ");
+            io::stdout().flush().map_err(|_| AppError::new("Failed to flush stdout"))?;
+            
+            let mut custom = String::new();
+            io::stdin().read_line(&mut custom).map_err(|_| AppError::new("Failed to read input"))?;
+            
+            let custom_trim = custom.trim().to_string();
+            if custom_trim.is_empty() {
+                return Err(AppError::new("❌ Commit aborted (empty message)."));
+            }
+            final_message = custom_trim;
+            break;
+        }
     }
 
-    // 4. Push to remote.
+    // 3. Commit
+    println!("📝 Committing…");
+    if !git_commit(&final_message)? {
+        return Err(AppError::new("❌ `git commit` failed."));
+    }
+
+    // 4. Push
     println!("🚀 Pushing to remote…");
     if git_push(&args.push_args)? {
         println!("✨ Push successful!");
     } else {
-        return Err(AppError::new(
-            "❌ `git push` failed. \
-             You may need to run `git pull --rebase` first, or set an upstream branch.",
-        ));
+        return Err(AppError::new("❌ `git push` failed."));
     }
 
     Ok(())
