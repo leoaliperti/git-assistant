@@ -13,9 +13,23 @@ fn main() {
         return;
     }
 
-    // --- 2. CHIEDIAMO AD APFEL ---
+
+    // --- 2. CHIEDIAMO AD APFEL (PROMPT POTENZIATO) ---
     let prompt = format!(
-        "Write a short, professional git commit message in English for this diff. Use Conventional Commits format. Output ONLY the message:\n{}",
+        "You are a strict code analyzer. Your ONLY job is to read a git diff and output a single-line git commit message using the Conventional Commits format.
+
+CRITICAL RULES:
+1. NEVER write 'Here is your commit', 'Commit:', or 'I generated'.
+2. DO NOT explain what you did.
+3. OUTPUT ONLY THE RAW COMMIT MESSAGE.
+
+EXAMPLES OF CORRECT OUTPUT:
+feat: add automatic push logic to main.rs
+fix: correct error handling for git diff command
+chore: update dependencies
+
+DIFF TO ANALYZE:
+{}",
         diff_text
     );
 
