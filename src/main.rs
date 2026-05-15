@@ -14,19 +14,19 @@ fn main() {
     }
 
 
-    // --- 2. CHIEDIAMO AD APFEL (PROMPT POTENZIATO) ---
+    // --- 2. CHIEDIAMO AD APFEL (PROMPT BLINDATO) ---
     let prompt = format!(
-        "You are a strict code analyzer. Your ONLY job is to read a git diff and output a single-line git commit message using the Conventional Commits format.
+        "You are a strict code analyzer. Read the git diff and output a single-line git commit message using the Conventional Commits format.
 
 CRITICAL RULES:
-1. NEVER write 'Here is your commit', 'Commit:', or 'I generated'.
-2. DO NOT explain what you did.
-3. OUTPUT ONLY THE RAW COMMIT MESSAGE.
+1. DO NOT copy the examples provided below.
+2. If the diff only removes comments or changes whitespace, use 'style:' or 'docs:'.
+3. Output ONLY the raw commit message, nothing else.
 
-EXAMPLES OF CORRECT OUTPUT:
-feat: add automatic push logic to main.rs
-fix: correct error handling for git diff command
-chore: update dependencies
+EXAMPLES OF FORMAT (DO NOT COPY THESE):
+style: remove obsolete code
+fix: resolve crash on startup
+docs: update readme instructions
 
 DIFF TO ANALYZE:
 {}",
