@@ -17,7 +17,7 @@ Instead of manually writing commit messages, `git-assistant` pipes your staged c
 
 Before installing, ensure you have the following on your system:
 1. **macOS 26+** (Required for the local Apple FoundationModels).
-2. **[apfel](https://github.com/simonbs/apfel)** installed and available in your system's `PATH`.
+2. **[apfel](https://github.com/Arthur-Ficial/apfel)** installed and available in your system's `PATH`.
 3. **Rust & Cargo** installed (via [rustup](https://rustup.rs/)).
 4. **Git** configured for your repository.
 
@@ -26,6 +26,6 @@ Before installing, ensure you have the following on your system:
 Clone this repository and install it globally using Cargo:
 
 ```bash
-git clone [https://github.com/tuo-username/git-assistant.git](https://github.com/tuo-username/git-assistant.git)
+git clone [https://github.com/leoaliperti/git-assistant.git](https://github.com/leoaliperti/git-assistant.git)
 cd git-assistant
 cargo install --path .
