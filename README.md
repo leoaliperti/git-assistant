@@ -26,6 +26,6 @@ Before installing, ensure you have the following on your system:
 Clone this repository and install it globally using Cargo:
 
 ```bash
-git clone [https://github.com/leoaliperti/git-assistant.git](https://github.com/leoaliperti/git-assistant.git)
+git clone https://github.com/leoaliperti/git-assistant.git
 cd git-assistant
 cargo install --path .
