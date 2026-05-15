@@ -13,7 +13,6 @@ fn main() {
         return;
     }
 
-
     // --- 2. CHIEDIAMO AD APFEL (PROMPT BLINDATO) ---
     let prompt = format!(
         "You are a strict code analyzer. Read the git diff and output a single-line git commit message using the Conventional Commits format.
